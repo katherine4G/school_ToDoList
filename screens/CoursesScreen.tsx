@@ -1,4 +1,5 @@
 // screens/CoursesScreen.tsx
+
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -16,8 +17,9 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
+import WheelColorPicker from 'react-native-wheel-color-picker';
 
-// 👇 Solo para Android clásico
+// 👇 Animación para Android clásico
 if (
   Platform.OS === 'android' &&
   UIManager.setLayoutAnimationEnabledExperimental
@@ -33,24 +35,34 @@ interface Course {
 
 export default function CoursesScreen() {
   const [courses, setCourses] = useState<Course[]>([]);
+  const [courseColors, setCourseColors] = useState<{ [courseId: string]: string }>({});
   const [courseName, setCourseName] = useState('');
   const [professorName, setProfessorName] = useState('');
 
   const [editModalVisible, setEditModalVisible] = useState(false);
+  const [colorModalVisible, setColorModalVisible] = useState(false);
   const [editedCourseName, setEditedCourseName] = useState('');
   const [courseToEdit, setCourseToEdit] = useState<Course | null>(null);
+  const [selectedCourseForColor, setSelectedCourseForColor] = useState<Course | null>(null);
+  const [tempColor, setTempColor] = useState('#4CAF50');
 
   useEffect(() => {
-    const loadCourses = async () => {
-      const stored = await AsyncStorage.getItem('@courses');
-      if (stored) setCourses(JSON.parse(stored));
+    const loadData = async () => {
+      const storedCourses = await AsyncStorage.getItem('@courses');
+      const storedColors = await AsyncStorage.getItem('@courseColors');
+      if (storedCourses) setCourses(JSON.parse(storedCourses));
+      if (storedColors) setCourseColors(JSON.parse(storedColors));
     };
-    loadCourses();
+    loadData();
   }, []);
 
   useEffect(() => {
     AsyncStorage.setItem('@courses', JSON.stringify(courses));
   }, [courses]);
+
+  useEffect(() => {
+    AsyncStorage.setItem('@courseColors', JSON.stringify(courseColors));
+  }, [courseColors]);
 
   const addCourse = () => {
     if (!courseName.trim()) {
@@ -77,6 +89,10 @@ export default function CoursesScreen() {
         onPress: () => {
           LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
           setCourses(courses.filter(c => c.id !== id));
+
+          const updatedColors = { ...courseColors };
+          delete updatedColors[id];
+          setCourseColors(updatedColors);
         },
       },
     ]);
@@ -99,6 +115,63 @@ export default function CoursesScreen() {
       setEditModalVisible(false);
     }
   };
+
+  const openColorPicker = (course: Course) => {
+    setSelectedCourseForColor(course);
+    setTempColor(courseColors[course.id] || '#4CAF50');
+    setColorModalVisible(true);
+  };
+
+  const saveCourseColor = () => {
+    if (selectedCourseForColor) {
+      setCourseColors(prev => ({
+        ...prev,
+        [selectedCourseForColor.id]: tempColor,
+      }));
+    }
+    setColorModalVisible(false);
+  };
+
+  const renderCourseItem = ({ item }: { item: Course }) => (
+    <View style={styles.courseCard}>
+      <View style={styles.courseHeader}>
+        <Text style={styles.courseName}>{item.name}</Text>
+        <View style={styles.actions}>
+          <TouchableOpacity onPress={() => startEditCourse(item)}>
+            <Ionicons name="pencil" size={20} color="#555" />
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => openColorPicker(item)}
+            style={{ marginLeft: 10 }}
+          >
+            <Ionicons name="color-palette" size={20} color="#4CAF50" />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => deleteCourse(item.id)}>
+            <Ionicons
+              name="trash"
+              size={20}
+              color="#E53935"
+              style={{ marginLeft: 10 }}
+            />
+          </TouchableOpacity>
+        </View>
+      </View>
+      {item.professor && (
+        <Text style={styles.professor}>👨‍🏫 {item.professor}</Text>
+      )}
+    {courseColors[item.id] && (
+    <View
+        style={[
+        styles.colorPreview,
+        { backgroundColor: courseColors[item.id] || '#999999' },
+        ]}
+    >
+        <Text style={styles.colorText}>Color</Text>
+    </View>
+    )}
+
+    </View>
+  );
 
   return (
     <View style={styles.container}>
@@ -123,35 +196,13 @@ export default function CoursesScreen() {
       <FlatList
         data={courses}
         keyExtractor={item => item.id}
-        renderItem={({ item }) => (
-          <View style={styles.courseCard}>
-            <View style={styles.courseHeader}>
-              <Text style={styles.courseName}>{item.name}</Text>
-              <View style={styles.actions}>
-                <TouchableOpacity onPress={() => startEditCourse(item)}>
-                  <Ionicons name="pencil" size={20} color="#555" />
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => deleteCourse(item.id)}>
-                  <Ionicons
-                    name="trash"
-                    size={20}
-                    color="#E53935"
-                    style={{ marginLeft: 10 }}
-                  />
-                </TouchableOpacity>
-              </View>
-            </View>
-            {item.professor && (
-              <Text style={styles.professor}>👨‍🏫 {item.professor}</Text>
-            )}
-          </View>
-        )}
+        renderItem={renderCourseItem}
         ListEmptyComponent={
           <Text style={styles.empty}>No courses added yet!</Text>
         }
       />
 
-      {/* ✅ MODAL para editar curso */}
+      {/* ✅ MODAL Edit Course */}
       <Modal
         visible={editModalVisible}
         animationType="slide"
@@ -174,6 +225,35 @@ export default function CoursesScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* ✅ MODAL Color Picker */}
+<Modal
+  visible={colorModalVisible}
+  animationType="slide"
+  transparent
+  onRequestClose={() => setColorModalVisible(false)}
+>
+  <View style={styles.modalContainer}>
+    <View style={styles.modalContent}>
+      <Text style={styles.modalTitle}>Pick Color</Text>
+        <View style={{ height: 200 }}>
+        <WheelColorPicker
+            color={tempColor}
+            onColorChangeComplete={setTempColor}
+            thumbSize={30}
+            sliderSize={20}
+            swatches={false}
+            discrete={false}
+        />
+        </View>
+
+        <Button title="Save Color" onPress={saveCourseColor} />
+        <Button title="Close" onPress={() => setColorModalVisible(false)} />
+
+    </View>
+  </View>
+</Modal>
+
     </View>
   );
 }
@@ -205,6 +285,13 @@ const styles = StyleSheet.create({
   courseName: { fontSize: 18, fontWeight: 'bold' },
   actions: { flexDirection: 'row', alignItems: 'center' },
   professor: { marginTop: 8, color: '#555' },
+  colorPreview: {
+    marginTop: 8,
+    padding: 4,
+    borderRadius: 4,
+    alignSelf: 'flex-start',
+  },
+  colorText: { fontSize: 12, color: '#fff' },
   empty: { textAlign: 'center', color: '#777', marginTop: 20 },
   modalContainer: {
     flex: 1,

@@ -3,7 +3,7 @@ import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
-import { GestureHandlerRootView } from 'react-native-gesture-handler'; // 👈 Fundamental para Swipeable
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import HomeScreen from './screens/HomeScreen';
 import CalendarScreen from './screens/CalendarScreen';
@@ -11,9 +11,10 @@ import SettingsScreen from './screens/SettingsScreen';
 import TasksScreen from './screens/TasksScreen';
 import CoursesScreen from './screens/CoursesScreen';
 
+// ✅ Asegúrate de tipar Calendar con parámetros opcionales
 export type RootTabParamList = {
   Home: undefined;
-  Calendar: undefined;
+  Calendar: { selectedDate?: string; editingTaskId?: string };
   Tasks: undefined;
   Courses: undefined;
   Settings: undefined;
@@ -39,9 +40,7 @@ export default function App() {
               else if (route.name === 'Courses') iconName = focused ? 'book' : 'book-outline';
               else if (route.name === 'Settings') iconName = focused ? 'settings' : 'settings-outline';
 
-             // return <Ionicons name={iconName} size={size} color={color} />;
-             return <Ionicons name={iconName as keyof typeof Ionicons.glyphMap} size={size} color={color} />;
-
+              return <Ionicons name={iconName as keyof typeof Ionicons.glyphMap} size={size} color={color} />;
             },
           })}
         >

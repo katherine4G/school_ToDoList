@@ -1,5 +1,4 @@
-// screens/HomeScreen.tsx
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -11,10 +10,12 @@ import {
   Platform,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
+import { RootTabParamList } from '../App';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { Snackbar } from 'react-native-paper';
+import { Snackbar, Menu, Provider } from 'react-native-paper';
 import { Swipeable } from 'react-native-gesture-handler';
 
 interface Task {
@@ -33,7 +34,6 @@ interface TaskWithDate extends Task {
   date: string;
 }
 
-// Habilitar LayoutAnimation en Android clásico
 if (
   Platform.OS === 'android' &&
   UIManager.setLayoutAnimationEnabledExperimental
@@ -41,14 +41,18 @@ if (
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
+type HomeScreenNavProp = BottomTabNavigationProp<RootTabParamList, 'Home'>;
+
 export default function HomeScreen() {
   const [tasksByDate, setTasksByDate] = useState<{ [date: string]: Task[] }>({});
   const [courses, setCourses] = useState<Course[]>([]);
   const [courseColors, setCourseColors] = useState<{ [courseId: string]: string }>({});
   const [snackbarVisible, setSnackbarVisible] = useState(false);
   const [lastDeletedTask, setLastDeletedTask] = useState<TaskWithDate | null>(null);
+  const [visibleMenu, setVisibleMenu] = useState<string | null>(null);
 
-  // ✅ Load data on focus
+  const navigation = useNavigation<HomeScreenNavProp>();
+
   useFocusEffect(
     useCallback(() => {
       const loadData = async () => {
@@ -64,27 +68,27 @@ export default function HomeScreen() {
     }, [])
   );
 
-  // ✅ Generate missing colors once
-  useEffect(() => {
-    const generated: { [id: string]: string } = {};
+  React.useEffect(() => {
+    const newColors: { [id: string]: string } = { ...courseColors };
+    let updated = false;
+
     courses.forEach(course => {
-      if (!courseColors[course.id]) {
+      if (!newColors[course.id]) {
         const hue = Math.floor(Math.random() * 360);
-        generated[course.id] = `hsl(${hue}, 70%, 70%)`;
+        newColors[course.id] = `hsl(${hue}, 70%, 70%)`;
+        updated = true;
       }
     });
-    if (Object.keys(generated).length > 0) {
-      setCourseColors(prev => ({ ...prev, ...generated }));
+
+    if (updated) {
+      setCourseColors(newColors);
+      AsyncStorage.setItem('@courseColors', JSON.stringify(newColors));
     }
   }, [courses]);
 
-  useEffect(() => {
-    AsyncStorage.setItem('@courseColors', JSON.stringify(courseColors));
-  }, [courseColors]);
-
   const getCourseColor = (courseId: string | null | undefined) => {
-    if (!courseId) return '#4CAF50'; // default
-    return courseColors[courseId] || '#4CAF50';
+    if (!courseId) return '#999999';
+    return courseColors[courseId] || '#999999';
   };
 
   const toggleTask = async (task: TaskWithDate) => {
@@ -102,26 +106,21 @@ export default function HomeScreen() {
 
   const deleteTask = async (task: TaskWithDate) => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-
     const updatedDateTasks = tasksByDate[task.date].filter(t => t.id !== task.id);
     const updated = { ...tasksByDate };
-
     if (updatedDateTasks.length === 0) {
       delete updated[task.date];
     } else {
       updated[task.date] = updatedDateTasks;
     }
-
     setTasksByDate(updated);
     await AsyncStorage.setItem('@tasksByDate', JSON.stringify(updated));
-
     setLastDeletedTask(task);
     setSnackbarVisible(true);
   };
 
   const undoDelete = async () => {
     if (!lastDeletedTask) return;
-
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     const restored = {
       ...tasksByDate,
@@ -130,11 +129,18 @@ export default function HomeScreen() {
         ...(tasksByDate[lastDeletedTask.date] || []),
       ],
     };
-
     setTasksByDate(restored);
     await AsyncStorage.setItem('@tasksByDate', JSON.stringify(restored));
     setLastDeletedTask(null);
     setSnackbarVisible(false);
+  };
+
+  const handleEditTask = (task: TaskWithDate) => {
+    setVisibleMenu(null);
+    navigation.navigate('Calendar', {
+      selectedDate: task.date,
+      editingTaskId: task.id,
+    });
   };
 
   const allTasks: TaskWithDate[] = Object.entries(tasksByDate)
@@ -157,69 +163,96 @@ export default function HomeScreen() {
   );
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>🏠 All Tasks</Text>
+    <Provider>
+      <View style={styles.container}>
+        <Text style={styles.title}>🏠 All Tasks</Text>
 
-      {allTasks.length === 0 && (
-        <Text style={styles.empty}>You have no tasks yet! 📚</Text>
-      )}
+        {allTasks.length === 0 && (
+          <Text style={styles.empty}>You have no tasks yet! 📚</Text>
+        )}
 
-      <FlatList
-        data={allTasks}
-        keyExtractor={item => item.id}
-        renderItem={({ item }) => {
-          const courseName =
-            courses.find(c => c.id === item.courseId)?.name || 'No course';
-          const badgeColor = getCourseColor(item.courseId);
+        <FlatList
+          data={allTasks}
+          keyExtractor={item => item.id}
+          renderItem={({ item }) => {
+            const courseName =
+              courses.find(c => c.id === item.courseId)?.name || 'No course';
+            const badgeColor = getCourseColor(item.courseId);
 
-          return (
-            <Swipeable renderRightActions={() => renderRightActions(item)}>
-              <TouchableOpacity
-                onPress={() => toggleTask(item)}
-                activeOpacity={0.7}
-              >
+            return (
+              <Swipeable renderRightActions={() => renderRightActions(item)}>
                 <View style={styles.card}>
-                  <View style={styles.cardHeader}>
-                    <Text style={styles.dateText}>📅 {item.date}</Text>
-                    <Ionicons
-                      name={item.completed ? 'checkmark-circle' : 'ellipse-outline'}
-                      size={24}
-                      color={item.completed ? '#4CAF50' : '#ccc'}
-                    />
-                  </View>
-
-                  <Text
-                    style={[
-                      styles.taskTitle,
-                      item.completed && styles.completedText,
-                    ]}
+                  <TouchableOpacity
+                    onPress={() => toggleTask(item)}
+                    activeOpacity={0.7}
                   >
-                    {item.title}
-                  </Text>
+                    <View style={styles.cardHeader}>
+                      <Text style={styles.dateText}>📅 {item.date}</Text>
+                      <Ionicons
+                        name={item.completed ? 'checkmark-circle' : 'ellipse-outline'}
+                        size={24}
+                        color={item.completed ? '#4CAF50' : '#ccc'}
+                      />
+                    </View>
 
-                  <View style={[styles.courseBadge, { backgroundColor: badgeColor }]}>
-                    <Text style={styles.courseText}>{courseName}</Text>
+                    <Text
+                      style={[
+                        styles.taskTitle,
+                        item.completed && styles.completedText,
+                      ]}
+                    >
+                      {item.title}
+                    </Text>
+
+                    <View style={[styles.courseBadge, { backgroundColor: badgeColor }]}>
+                      <Text style={styles.courseText}>{courseName}</Text>
+                    </View>
+                  </TouchableOpacity>
+
+                  <View style={styles.menuWrapper}>
+                    <Menu
+                      visible={visibleMenu === item.id}
+                      onDismiss={() => setVisibleMenu(null)}
+                      anchor={
+                        <TouchableOpacity
+                          onPress={() => setVisibleMenu(item.id)}
+                        >
+                          <Ionicons name="ellipsis-vertical" size={20} color="#555" />
+                        </TouchableOpacity>
+                      }
+                    >
+                      <Menu.Item onPress={() => handleEditTask(item)} title="Edit" />
+                      <Menu.Item onPress={() => deleteTask(item)} title="Delete" />
+                    </Menu>
                   </View>
                 </View>
-              </TouchableOpacity>
-            </Swipeable>
-          );
-        }}
-        contentContainerStyle={{ paddingBottom: 50 }}
-      />
+              </Swipeable>
+            );
+          }}
+          contentContainerStyle={{ paddingBottom: 50 }}
+        />
 
-      <Snackbar
-        visible={snackbarVisible}
-        onDismiss={() => setSnackbarVisible(false)}
-        duration={3000}
-        action={{
-          label: 'Undo',
-          onPress: undoDelete,
-        }}
-      >
-        <Text>Task deleted</Text>
-      </Snackbar>
-    </View>
+        <TouchableOpacity
+          style={styles.fab}
+          onPress={() => navigation.navigate('Calendar', {})}
+          activeOpacity={0.8}
+        >
+          <Ionicons name="add" size={32} color="#fff" />
+        </TouchableOpacity>
+
+        <Snackbar
+          visible={snackbarVisible}
+          onDismiss={() => setSnackbarVisible(false)}
+          duration={3000}
+          action={{
+            label: 'Undo',
+            onPress: undoDelete,
+          }}
+        >
+          <Text>Task deleted</Text>
+        </Snackbar>
+      </View>
+    </Provider>
   );
 }
 
@@ -251,6 +284,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 6,
     elevation: 3,
+    position: 'relative',
   },
   cardHeader: {
     flexDirection: 'row',
@@ -271,6 +305,11 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   courseText: { color: '#fff', fontSize: 12 },
+  menuWrapper: {
+    position: 'absolute',
+    bottom: 10,
+    right: 10,
+  },
   deleteButton: {
     backgroundColor: '#E53935',
     justifyContent: 'center',
@@ -281,4 +320,20 @@ const styles = StyleSheet.create({
     marginVertical: 7,
   },
   deleteText: { color: '#fff', fontSize: 12 },
+  fab: {
+    position: 'absolute',
+    bottom: 30,
+    right: 30,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#00BFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+  },
 });

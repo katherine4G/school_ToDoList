@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,12 +9,12 @@ import {
   Modal,
   TextInput,
   Button,
-  Platform,
 } from 'react-native';
 import { Calendar, DateData } from 'react-native-calendars';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Picker } from '@react-native-picker/picker';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { useFocusEffect, useRoute } from '@react-navigation/native';
 
 interface Task {
   id: string;
@@ -29,6 +29,11 @@ interface Course {
   name: string;
 }
 
+interface RouteParams {
+  selectedDate?: string;
+  editingTaskId?: string;
+}
+
 export default function CalendarScreen() {
   const [selectedDate, setSelectedDate] = useState('');
   const [tasksByDate, setTasksByDate] = useState<{ [date: string]: Task[] }>({});
@@ -39,9 +44,18 @@ export default function CalendarScreen() {
   const [taskText, setTaskText] = useState('');
   const [taskTime, setTaskTime] = useState(new Date());
   const [showTimePicker, setShowTimePicker] = useState(false);
+  const [showDatePicker, setShowDatePicker] = useState(false);
 
   const [isEditing, setIsEditing] = useState(false);
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
+
+  const route = useRoute();
+  const { selectedDate: routeDate, editingTaskId: routeTaskId } = (route.params || {}) as RouteParams;
+
+  useEffect(() => {
+    if (routeDate) setSelectedDate(routeDate);
+    if (routeTaskId && routeDate) openEditTaskModal(routeTaskId, routeDate);
+  }, [routeDate, routeTaskId]);
 
   useEffect(() => {
     const loadCourses = async () => {
@@ -51,13 +65,15 @@ export default function CalendarScreen() {
     loadCourses();
   }, []);
 
-  useEffect(() => {
-    const loadTasks = async () => {
-      const stored = await AsyncStorage.getItem('@tasksByDate');
-      if (stored) setTasksByDate(JSON.parse(stored));
-    };
-    loadTasks();
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      const loadTasks = async () => {
+        const stored = await AsyncStorage.getItem('@tasksByDate');
+        if (stored) setTasksByDate(JSON.parse(stored));
+      };
+      loadTasks();
+    }, [])
+  );
 
   useEffect(() => {
     AsyncStorage.setItem('@tasksByDate', JSON.stringify(tasksByDate));
@@ -87,8 +103,9 @@ export default function CalendarScreen() {
     setModalVisible(true);
   };
 
-  const openEditTaskModal = (taskId: string) => {
-    const task = tasksByDate[selectedDate].find(t => t.id === taskId);
+  const openEditTaskModal = (taskId: string, dateParam?: string) => {
+    const dateKey = dateParam || selectedDate;
+    const task = tasksByDate[dateKey]?.find(t => t.id === taskId);
     if (!task) return;
 
     setIsEditing(true);
@@ -110,21 +127,29 @@ export default function CalendarScreen() {
     const formattedTime = formatTime(taskTime);
     if (!taskText.trim() || !selectedDate) return;
 
+    let updated = { ...tasksByDate };
+
     if (isEditing && editingTaskId) {
-      const updated = {
-        ...tasksByDate,
-        [selectedDate]: tasksByDate[selectedDate].map(t =>
-          t.id === editingTaskId
-            ? {
-                ...t,
-                title: taskText.trim(),
-                courseId: selectedCourseId ?? null,
-                time: formattedTime,
-              }
-            : t
-        ),
+      // Remove old task
+      let newDateKey = selectedDate;
+      const oldTask = Object.entries(updated).find(([_, tasks]) =>
+        tasks.find(t => t.id === editingTaskId)
+      );
+      if (oldTask) {
+        const [oldDate, tasks] = oldTask;
+        updated[oldDate] = tasks.filter(t => t.id !== editingTaskId);
+        if (updated[oldDate].length === 0) delete updated[oldDate];
+      }
+
+      // Add updated task to new date
+      const updatedTask: Task = {
+        id: editingTaskId,
+        title: taskText.trim(),
+        completed: false,
+        courseId: selectedCourseId ?? null,
+        time: formattedTime,
       };
-      saveTasksSafely(updated);
+      updated[newDateKey] = [updatedTask, ...(updated[newDateKey] || [])];
     } else {
       const newTask: Task = {
         id: Date.now().toString(),
@@ -133,13 +158,10 @@ export default function CalendarScreen() {
         courseId: selectedCourseId ?? null,
         time: formattedTime,
       };
-      const updated = {
-        ...tasksByDate,
-        [selectedDate]: [newTask, ...(tasksByDate[selectedDate] || [])],
-      };
-      saveTasksSafely(updated);
+      updated[selectedDate] = [newTask, ...(updated[selectedDate] || [])];
     }
 
+    saveTasksSafely(updated);
     setModalVisible(false);
   };
 
@@ -241,7 +263,6 @@ export default function CalendarScreen() {
         <Text style={styles.infoText}>Select a date to see tasks!</Text>
       )}
 
-      {/* ✅ MODAL */}
       <Modal
         visible={modalVisible}
         animationType="slide"
@@ -276,6 +297,26 @@ export default function CalendarScreen() {
                 display="default"
                 onChange={onTimeChange}
               />
+            )}
+
+            {isEditing && (
+              <>
+                <Button title="Change Date" onPress={() => setShowDatePicker(true)} />
+                {showDatePicker && (
+                  <DateTimePicker
+                    value={selectedDate ? new Date(selectedDate) : new Date()}
+                    mode="date"
+                    display="default"
+                    onChange={(e, newDate) => {
+                      if (newDate) {
+                        const isoDate = newDate.toISOString().split('T')[0];
+                        setSelectedDate(isoDate);
+                      }
+                      setShowDatePicker(false);
+                    }}
+                  />
+                )}
+              </>
             )}
 
             <Picker
